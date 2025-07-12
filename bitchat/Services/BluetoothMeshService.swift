@@ -136,7 +136,7 @@ class BluetoothMeshService: NSObject {
     
     // Network size estimation
     private var estimatedNetworkSize: Int {
-        return max(activePeers.count, connectedPeripherals.count)
+        return max(self.activePeers.count, self.connectedPeripherals.count)
     }
     
     // Adaptive parameters based on network size
@@ -251,7 +251,7 @@ class BluetoothMeshService: NSObject {
     
     // Public method to get peer's public key data
     func getPeerPublicKey(_ peerID: String) -> Data? {
-        return encryptionService.getPeerIdentityKey(peerID)
+        return self.encryptionService.getPeerIdentityKey(peerID)
     }
     
     override init() {
@@ -263,7 +263,7 @@ class BluetoothMeshService: NSObject {
         
         super.init()
         
-        centralManager = CBCentralManager(delegate: self, queue: nil)
+        self.centralManager = CBCentralManager(delegate: self, queue: nil)
         peripheralManager = CBPeripheralManager(delegate: self, queue: nil)
         
         // Start bloom filter reset timer (reset every 5 minutes)
@@ -327,8 +327,8 @@ class BluetoothMeshService: NSObject {
         Thread.sleep(forTimeInterval: 0.2)
         
         // First, disconnect all peripherals which will trigger disconnect delegates
-        for (_, peripheral) in connectedPeripherals {
-            centralManager?.cancelPeripheralConnection(peripheral)
+        for (_, peripheral) in self.connectedPeripherals {
+            self.centralManager?.cancelPeripheralConnection(peripheral)
         }
         
         // Stop advertising
@@ -337,7 +337,7 @@ class BluetoothMeshService: NSObject {
         }
         
         // Stop scanning
-        centralManager?.stopScan()
+        self.centralManager?.stopScan()
         
         // Remove all services - this will disconnect any connected centrals
         if peripheralManager?.state == .poweredOn {
@@ -345,24 +345,24 @@ class BluetoothMeshService: NSObject {
         }
         
         // Clear all tracking
-        connectedPeripherals.removeAll()
+        self.connectedPeripherals.removeAll()
         subscribedCentrals.removeAll()
-        activePeersLock.lock()
-        activePeers.removeAll()
-        activePeersLock.unlock()
-        announcedPeers.removeAll()
+        self.activePeersLock.lock()
+        self.activePeers.removeAll()
+        self.activePeersLock.unlock()
+        self.announcedPeers.removeAll()
         
         // Clear announcement tracking
-        announcedToPeers.removeAll()
+        self.announcedToPeers.removeAll()
         
         // Clear last seen timestamps
-        peerLastSeenTimestamps.removeAll()
+        self.peerLastSeenTimestamps.removeAll()
     }
     
     func startServices() {
         // Starting services
         // Start both central and peripheral services
-        if centralManager?.state == .poweredOn {
+        if self.centralManager?.state == .poweredOn {
             startScanning()
         }
         if peripheralManager?.state == .poweredOn {
@@ -388,7 +388,7 @@ class BluetoothMeshService: NSObject {
         let announcePacket = BitchatPacket(
             type: MessageType.announce.rawValue,
             ttl: 3,  // Increase TTL so announce reaches all peers
-            senderID: myPeerID,
+            senderID: self.myPeerID,
             payload: Data(vm.nickname.utf8)
         )
         
@@ -421,7 +421,7 @@ class BluetoothMeshService: NSObject {
         advertisementData = [
             CBAdvertisementDataServiceUUIDsKey: [BluetoothMeshService.serviceUUID],
             // Use only peer ID without any identifying prefix
-            CBAdvertisementDataLocalNameKey: myPeerID
+            CBAdvertisementDataLocalNameKey: self.myPeerID
         ]
         
         isAdvertising = true
@@ -429,7 +429,7 @@ class BluetoothMeshService: NSObject {
     }
     
     func startScanning() {
-        guard centralManager?.state == .poweredOn else { 
+        guard self.centralManager?.state == .poweredOn else { 
             return 
         }
         
@@ -438,7 +438,7 @@ class BluetoothMeshService: NSObject {
             CBCentralManagerScanOptionAllowDuplicatesKey: true
         ]
         
-        centralManager?.scanForPeripherals(
+        self.centralManager?.scanForPeripherals(
             withServices: [BluetoothMeshService.serviceUUID],
             options: scanOptions
         )
@@ -890,7 +890,7 @@ class BluetoothMeshService: NSObject {
         let packet = BitchatPacket(
             type: MessageType.announce.rawValue,
             ttl: 3,  // Allow relay for better reach
-            senderID: myPeerID,
+            senderID: self.myPeerID,
             payload: Data(vm.nickname.utf8)
         )
         
@@ -899,9 +899,9 @@ class BluetoothMeshService: NSObject {
             broadcastPacket(packet)
             
             // Also try targeted send if we have the peripheral
-            if let peripheral = connectedPeripherals[peerID],
-               peripheral.state == .connected,
-               let characteristic = peripheral.services?.first(where: { $0.uuid == BluetoothMeshService.serviceUUID })?.characteristics?.first(where: { $0.uuid == BluetoothMeshService.characteristicUUID }) {
+            if let peripheral = self.connectedPeripherals[peerID],
+                peripheral.state == .connected,
+                let characteristic = peripheral.services?.first(where: { $0.uuid == BluetoothMeshService.serviceUUID })?.characteristics?.first(where: { $0.uuid == BluetoothMeshService.characteristicUUID }) {
                 let writeType: CBCharacteristicWriteType = characteristic.properties.contains(.write) ? .withResponse : .withoutResponse
                 peripheral.writeValue(data, for: characteristic, type: writeType)
             } else {
@@ -909,7 +909,7 @@ class BluetoothMeshService: NSObject {
         } else {
         }
         
-        announcedToPeers.insert(peerID)
+        self.announcedToPeers.insert(peerID)
     }
     
     private func sendLeaveAnnouncement() {
@@ -918,7 +918,7 @@ class BluetoothMeshService: NSObject {
         let packet = BitchatPacket(
             type: MessageType.leave.rawValue,
             ttl: 1,  // Don't relay leave messages
-            senderID: myPeerID,
+            senderID: self.myPeerID,
             payload: Data(vm.nickname.utf8)
         )
         
@@ -927,19 +927,19 @@ class BluetoothMeshService: NSObject {
     
     
     func getPeerNicknames() -> [String: String] {
-        peerNicknamesLock.lock()
+        self.peerNicknamesLock.lock()
         let copy = peerNicknames
-        peerNicknamesLock.unlock()
+        self.peerNicknamesLock.unlock()
         return copy
     }
     
     func getPeerRSSI() -> [String: NSNumber] {
         // Create a copy with default values for connected peers without RSSI
-        var rssiWithDefaults = peerRSSI
+        var rssiWithDefaults = self.peerRSSI
         
         // For any active peer without RSSI, assume decent signal (-60)
         // This handles centrals where we can't read RSSI
-        for peerID in activePeers {
+        for peerID in self.activePeers {
             if rssiWithDefaults[peerID] == nil {
                 rssiWithDefaults[peerID] = NSNumber(value: -60)  // Good signal default
             }
@@ -956,47 +956,47 @@ class BluetoothMeshService: NSObject {
         }
         
         // Stop scanning
-        centralManager?.stopScan()
+        self.centralManager?.stopScan()
         scanDutyCycleTimer?.invalidate()
         scanDutyCycleTimer = nil
         
         // Disconnect all peripherals
-        for (_, peripheral) in connectedPeripherals {
-            centralManager?.cancelPeripheralConnection(peripheral)
+        for (_, peripheral) in self.connectedPeripherals {
+            self.centralManager?.cancelPeripheralConnection(peripheral)
         }
         
         // Clear all peer data
-        connectedPeripherals.removeAll()
-        peripheralCharacteristics.removeAll()
+        self.connectedPeripherals.removeAll()
+        self.peripheralCharacteristics.removeAll()
         discoveredPeripherals.removeAll()
         subscribedCentrals.removeAll()
-        peerNicknames.removeAll()
-        activePeers.removeAll()
-        peerRSSI.removeAll()
-        peripheralRSSI.removeAll()
-        announcedToPeers.removeAll()
-        announcedPeers.removeAll()
-        processedMessages.removeAll()
+        self.peerNicknames.removeAll()
+        self.activePeers.removeAll()
+        self.peerRSSI.removeAll()
+        self.peripheralRSSI.removeAll()
+        self.announcedToPeers.removeAll()
+        self.announcedPeers.removeAll()
+        self.processedMessages.removeAll()
         incomingFragments.removeAll()
         fragmentMetadata.removeAll()
         
         // Clear persistent identity
-        encryptionService.clearPersistentIdentity()
+        self.encryptionService.clearPersistentIdentity()
         
         // print("[PANIC] Emergency disconnect completed")
     }
     
     private func getAllConnectedPeerIDs() -> [String] {
         // Return all valid active peers
-        activePeersLock.lock()
-        let peersCopy = activePeers
-        activePeersLock.unlock()
+        self.activePeersLock.lock()
+        let peersCopy = self.activePeers
+        self.activePeersLock.unlock()
         
         let validPeers = peersCopy.filter { peerID in
             // Ensure peerID is valid
             return !peerID.isEmpty &&
-                   peerID != "unknown" &&
-                   peerID != myPeerID
+                    peerID != "unknown" &&
+                    peerID != self.myPeerID
         }
         
         return Array(validPeers).sorted()
@@ -1038,9 +1038,9 @@ class BluetoothMeshService: NSObject {
         let staleThreshold: TimeInterval = 180.0 // 3 minutes - increased for better stability
         let now = Date()
         
-        activePeersLock.lock()
-        let peersToRemove = activePeers.filter { peerID in
-            if let lastSeen = peerLastSeenTimestamps[peerID] {
+        self.activePeersLock.lock()
+        let peersToRemove = self.activePeers.filter { peerID in
+            if let lastSeen = self.peerLastSeenTimestamps[peerID] {
                 return now.timeIntervalSince(lastSeen) > staleThreshold
             }
             return false // Keep peers we haven't tracked yet
@@ -1048,30 +1048,30 @@ class BluetoothMeshService: NSObject {
         
         for peerID in peersToRemove {
             // Check if this peer has an active peripheral connection
-            if let peripheral = connectedPeripherals[peerID], peripheral.state == .connected {
+            if let peripheral = self.connectedPeripherals[peerID], peripheral.state == .connected {
                 // Skipping removal - still has active connection
                 // Update last seen time to prevent immediate re-removal
-                peerLastSeenTimestamps[peerID] = Date()
+                self.peerLastSeenTimestamps[peerID] = Date()
                 continue
             }
             
-            activePeers.remove(peerID)
-            peerLastSeenTimestamps.removeValue(forKey: peerID)
+            self.activePeers.remove(peerID)
+            self.peerLastSeenTimestamps.removeValue(forKey: peerID)
             
             // Clean up all associated data
-            connectedPeripherals.removeValue(forKey: peerID)
-            peerRSSI.removeValue(forKey: peerID)
-            announcedPeers.remove(peerID)
-            announcedToPeers.remove(peerID)
-            processedKeyExchanges = processedKeyExchanges.filter { !$0.contains(peerID) }
+            self.connectedPeripherals.removeValue(forKey: peerID)
+            self.peerRSSI.removeValue(forKey: peerID)
+            self.announcedPeers.remove(peerID)
+            self.announcedToPeers.remove(peerID)
+            self.processedKeyExchanges = self.processedKeyExchanges.filter { !$0.contains(peerID) }
             
-            peerNicknamesLock.lock()
-            peerNicknames.removeValue(forKey: peerID)
-            peerNicknamesLock.unlock()
+            self.peerNicknamesLock.lock()
+            self.peerNicknames.removeValue(forKey: peerID)
+            self.peerNicknamesLock.unlock()
             
             // Removed stale peer
         }
-        activePeersLock.unlock()
+        self.activePeersLock.unlock()
         
         if !peersToRemove.isEmpty {
             notifyPeerListUpdate()
@@ -1172,7 +1172,6 @@ class BluetoothMeshService: NSObject {
                 return
             }
             
-            
             // Check if we've already sent cached messages to this peer in this session
             if self.cachedMessagesSentToPeer.contains(peerID) {
                 return  // Already sent cached messages to this peer in this session
@@ -1207,7 +1206,6 @@ class BluetoothMeshService: NSObject {
                 return false  // Don't forward broadcast messages
             }
             messagesToSend.append(contentsOf: recipientMessages)
-            
             
             // Sort messages by timestamp to ensure proper ordering
             messagesToSend.sort { $0.timestamp < $1.timestamp }
@@ -1299,8 +1297,8 @@ class BluetoothMeshService: NSObject {
         
         // Send to connected peripherals (as central)
         var sentToPeripherals = 0
-        for (_, peripheral) in connectedPeripherals {
-            if let characteristic = peripheralCharacteristics[peripheral] {
+        for (_, peripheral) in self.connectedPeripherals {
+            if let characteristic = self.peripheralCharacteristics[peripheral] {
                 // Check if peripheral is connected before writing
                 if peripheral.state == .connected {
                     // Use withoutResponse for faster transmission when possible
@@ -1314,9 +1312,9 @@ class BluetoothMeshService: NSObject {
                         sentToPeripherals += 1
                     }
                 } else {
-                    if let peerID = connectedPeripherals.first(where: { $0.value == peripheral })?.key {
-                        connectedPeripherals.removeValue(forKey: peerID)
-                        peripheralCharacteristics.removeValue(forKey: peripheral)
+                    if let peerID = self.connectedPeripherals.first(where: { $0.value == peripheral })?.key {
+                        self.connectedPeripherals.removeValue(forKey: peerID)
+                        self.peripheralCharacteristics.removeValue(forKey: peripheral)
                     }
                 }
             } else {
@@ -1386,7 +1384,7 @@ class BluetoothMeshService: NSObject {
             // Update last seen timestamp for this peer
             if let senderID = String(data: packet.senderID.trimmingNullBytes(), encoding: .utf8),
                senderID != "unknown" && senderID != self.myPeerID {
-                peerLastSeenTimestamps[senderID] = Date()
+                self.peerLastSeenTimestamps[senderID] = Date()
             }
             
             // Replay attack protection: Check timestamp is within reasonable window (5 minutes)
@@ -1410,27 +1408,27 @@ class BluetoothMeshService: NSObject {
         }
         
         // Use bloom filter for efficient duplicate detection
-        if messageBloomFilter.contains(messageID) {
+        if self.messageBloomFilter.contains(messageID) {
             // Also check exact set for accuracy (bloom filter can have false positives)
-            if processedMessages.contains(messageID) {
+            if self.processedMessages.contains(messageID) {
                 return
             } else {
                 // False positive from Bloom filter
             }
         }
         
-        messageBloomFilter.insert(messageID)
-        processedMessages.insert(messageID)
+        self.messageBloomFilter.insert(messageID)
+        self.processedMessages.insert(messageID)
         
         // Log statistics periodically
-        if messageBloomFilter.insertCount % 100 == 0 {
-            let fpRate = messageBloomFilter.estimatedFalsePositiveRate
+        if self.messageBloomFilter.insertCount % 100 == 0 {
+            let fpRate = self.messageBloomFilter.estimatedFalsePositiveRate
         }
         
         // Reset bloom filter periodically to prevent saturation
-        if processedMessages.count > 1000 {
-            processedMessages.removeAll()
-            messageBloomFilter.reset()
+        if self.processedMessages.count > 1000 {
+            self.processedMessages.removeAll()
+            self.messageBloomFilter.reset()
         }
         
         // let _ = String(data: packet.senderID.trimmingNullBytes(), encoding: .utf8) ?? "unknown"
@@ -1446,7 +1444,7 @@ class BluetoothMeshService: NSObject {
             }
             
             // Ignore our own messages
-            if senderID == myPeerID {
+            if senderID == self.myPeerID {
                 return
             }
             
@@ -1458,14 +1456,14 @@ class BluetoothMeshService: NSObject {
                     // Verify signature if present
                     if let signature = packet.signature {
                         do {
-                            let isValid = try encryptionService.verify(signature, for: packet.payload, from: senderID)
+                            let isValid = try self.encryptionService.verify(signature, for: packet.payload, from: senderID)
                             if !isValid {
                                 return
                             }
                         } catch {
-                            if !loggedCryptoErrors.contains(senderID) {
+                            if !self.loggedCryptoErrors.contains(senderID) {
                                 // print("[CRYPTO] Failed to verify signature from \(senderID): \(error)")
-                                loggedCryptoErrors.insert(senderID)
+                                self.loggedCryptoErrors.insert(senderID)
                             }
                         }
                     }
@@ -1474,9 +1472,9 @@ class BluetoothMeshService: NSObject {
                     if let message = BitchatMessage.fromBinaryPayload(packet.payload) {
                             
                         // Store nickname mapping
-                        peerNicknamesLock.lock()
-                        peerNicknames[senderID] = message.sender
-                        peerNicknamesLock.unlock()
+                        self.peerNicknamesLock.lock()
+                        self.peerNicknames[senderID] = message.sender
+                        self.peerNicknamesLock.unlock()
                         
                         // Handle encrypted channel messages
                         var finalContent = message.content
@@ -1547,7 +1545,7 @@ class BluetoothMeshService: NSObject {
                         
                         if shouldRelay {
                             // Add random delay to prevent collision storms
-                            let delay = Double.random(in: minMessageDelay...maxMessageDelay)
+                            let delay = Double.random(in: self.minMessageDelay...self.maxMessageDelay)
                             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                                 self?.broadcastPacket(relayPacket)
                             }
@@ -1555,20 +1553,20 @@ class BluetoothMeshService: NSObject {
                     }
                     
                 } else if let recipientIDString = String(data: recipientID.trimmingNullBytes(), encoding: .utf8),
-                          recipientIDString == myPeerID {
+                          recipientIDString == self.myPeerID {
                     // PRIVATE MESSAGE FOR US
                     
                     // Verify signature if present
                     if let signature = packet.signature {
                         do {
-                            let isValid = try encryptionService.verify(signature, for: packet.payload, from: senderID)
+                            let isValid = try self.encryptionService.verify(signature, for: packet.payload, from: senderID)
                             if !isValid {
                                 return
                             }
                         } catch {
-                            if !loggedCryptoErrors.contains(senderID) {
+                            if !self.loggedCryptoErrors.contains(senderID) {
                                 // print("[CRYPTO] Failed to verify signature from \(senderID): \(error)")
-                                loggedCryptoErrors.insert(senderID)
+                                self.loggedCryptoErrors.insert(senderID)
                             }
                         }
                     }
@@ -1576,7 +1574,7 @@ class BluetoothMeshService: NSObject {
                     // Decrypt the message
                     let decryptedPayload: Data
                     do {
-                        let decryptedPadded = try encryptionService.decrypt(packet.payload, from: senderID)
+                        let decryptedPadded = try self.encryptionService.decrypt(packet.payload, from: senderID)
                         
                         // Remove padding
                         decryptedPayload = MessagePadding.unpad(decryptedPadded)
@@ -1606,11 +1604,11 @@ class BluetoothMeshService: NSObject {
                         let cutoffTime = Date().addingTimeInterval(-60)
                         self.receivedMessageTimestamps = self.receivedMessageTimestamps.filter { $0.value > cutoffTime }
                         
-                        peerNicknamesLock.lock()
-                        if peerNicknames[senderID] == nil {
-                            peerNicknames[senderID] = message.sender
+                        self.peerNicknamesLock.lock()
+                        if self.peerNicknames[senderID] == nil {
+                            self.peerNicknames[senderID] = message.sender
                         }
-                        peerNicknamesLock.unlock()
+                        self.peerNicknamesLock.unlock()
                         
                         let messageWithPeerID = BitchatMessage(
                             id: message.id,  // Preserve the original message ID
@@ -1674,7 +1672,7 @@ class BluetoothMeshService: NSObject {
                     
                     if shouldRelay {
                         // Add random delay to prevent collision storms
-                        let delay = Double.random(in: minMessageDelay...maxMessageDelay)
+                        let delay = Double.random(in: self.minMessageDelay...self.maxMessageDelay)
                         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                             self?.broadcastPacket(relayPacket)
                         }
@@ -1692,33 +1690,33 @@ class BluetoothMeshService: NSObject {
                     let exchangeKey = "\(senderID)-\(publicKeyData.hexEncodedString().prefix(16))"
                     
                     // Check if we've already processed this key exchange
-                    if processedKeyExchanges.contains(exchangeKey) {
+                    if self.processedKeyExchanges.contains(exchangeKey) {
                         // print("[DEBUG] Ignoring duplicate key exchange from \(senderID)")
                         return
                     }
                     
                     // Mark this key exchange as processed
-                    processedKeyExchanges.insert(exchangeKey)
+                    self.processedKeyExchanges.insert(exchangeKey)
                     do {
-                        try encryptionService.addPeerPublicKey(senderID, publicKeyData: publicKeyData)
+                        try self.encryptionService.addPeerPublicKey(senderID, publicKeyData: publicKeyData)
                     } catch {
                         // print("[KEY_EXCHANGE] Failed to add public key for \(senderID): \(error)")
                     }
                     
                     // Register identity key with view model for persistent favorites
                     if let viewModel = self.delegate as? ChatViewModel,
-                       let identityKeyData = encryptionService.getPeerIdentityKey(senderID) {
+                       let identityKeyData = self.encryptionService.getPeerIdentityKey(senderID) {
                         viewModel.registerPeerPublicKey(peerID: senderID, publicKeyData: identityKeyData)
                     }
                     
                     // If we have RSSI from discovery, apply it to this peer
                     if let peripheral = peripheral,
-                       let tempRSSI = peripheralRSSI[peripheral.identifier.uuidString] {
-                        peerRSSI[senderID] = tempRSSI
+                       let tempRSSI = self.peripheralRSSI[peripheral.identifier.uuidString] {
+                        self.peerRSSI[senderID] = tempRSSI
                     }
                     
                     // Track this peer temporarily
-                    if senderID != "unknown" && senderID != myPeerID {
+                    if senderID != "unknown" && senderID != self.myPeerID {
                         // Check if we need to update peripheral mapping from the specific peripheral that sent this
                         if let peripheral = peripheral {
                             // Check if we already have a different peripheral connected for this peer
@@ -1726,8 +1724,8 @@ class BluetoothMeshService: NSObject {
                                existingPeripheral != peripheral {
                                 // We have a duplicate connection - disconnect the newer one
                                 // print("[DEBUG] Duplicate connection detected for \(senderID), keeping existing")
-                                intentionalDisconnects.insert(peripheral.identifier.uuidString)
-                                centralManager?.cancelPeripheralConnection(peripheral)
+                                self.intentionalDisconnects.insert(peripheral.identifier.uuidString)
+                                self.centralManager?.cancelPeripheralConnection(peripheral)
                                 return
                             }
                             
@@ -1753,13 +1751,13 @@ class BluetoothMeshService: NSObject {
                         }
                         
                         // Add to active peers with proper locking
-                        activePeersLock.lock()
-                        let wasNewPeer = !activePeers.contains(senderID)
+                        self.activePeersLock.lock()
+                        let wasNewPeer = !self.activePeers.contains(senderID)
                         if wasNewPeer {
-                            activePeers.insert(senderID)
+                            self.activePeers.insert(senderID)
                             // print("[DEBUG] Added peer \(senderID) to active peers via key exchange")
                         }
-                        activePeersLock.unlock()
+                        self.activePeersLock.unlock()
                         
                         // Only notify if this was actually a new peer
                         if wasNewPeer {
@@ -1781,20 +1779,20 @@ class BluetoothMeshService: NSObject {
                let senderID = String(data: packet.senderID.trimmingNullBytes(), encoding: .utf8) {
                 
                 // Ignore if it's from ourselves
-                if senderID == myPeerID {
+                if senderID == self.myPeerID {
                     return
                 }
                 
                 // Check if we've already announced this peer
-                let isFirstAnnounce = !announcedPeers.contains(senderID)
+                let isFirstAnnounce = !self.announcedPeers.contains(senderID)
                 
                 // Clean up stale peer IDs with the same nickname
-                peerNicknamesLock.lock()
+                self.peerNicknamesLock.lock()
                 var stalePeerIDs: [String] = []
-                for (existingPeerID, existingNickname) in peerNicknames {
+                for (existingPeerID, existingNickname) in self.peerNicknames {
                     if existingNickname == nickname && existingPeerID != senderID {
                         // Check if this peer was seen very recently (within 10 seconds)
-                        let wasRecentlySeen = peerLastSeenTimestamps[existingPeerID].map { Date().timeIntervalSince($0) < 10.0 } ?? false
+                        let wasRecentlySeen = self.peerLastSeenTimestamps[existingPeerID].map { Date().timeIntervalSince($0) < 10.0 } ?? false
                         if !wasRecentlySeen {
                             // Found a stale peer ID with the same nickname
                             stalePeerIDs.append(existingPeerID)
@@ -1808,36 +1806,36 @@ class BluetoothMeshService: NSObject {
                 // Remove stale peer IDs
                 for stalePeerID in stalePeerIDs {
                     // Removing stale peer
-                    peerNicknames.removeValue(forKey: stalePeerID)
+                    self.peerNicknames.removeValue(forKey: stalePeerID)
                     
                     // Also remove from active peers
-                    activePeersLock.lock()
-                    activePeers.remove(stalePeerID)
-                    activePeersLock.unlock()
+                    self.activePeersLock.lock()
+                    self.activePeers.remove(stalePeerID)
+                    self.activePeersLock.unlock()
                     
                     // Remove from announced peers
-                    announcedPeers.remove(stalePeerID)
-                    announcedToPeers.remove(stalePeerID)
+                    self.announcedPeers.remove(stalePeerID)
+                    self.announcedToPeers.remove(stalePeerID)
                     
                     // Disconnect any peripherals associated with stale ID
-                    if let peripheral = connectedPeripherals[stalePeerID] {
-                        intentionalDisconnects.insert(peripheral.identifier.uuidString)
-                        centralManager?.cancelPeripheralConnection(peripheral)
-                        connectedPeripherals.removeValue(forKey: stalePeerID)
-                        peripheralCharacteristics.removeValue(forKey: peripheral)
+                    if let peripheral = self.connectedPeripherals[stalePeerID] {
+                        self.intentionalDisconnects.insert(peripheral.identifier.uuidString)
+                        self.centralManager?.cancelPeripheralConnection(peripheral)
+                        self.connectedPeripherals.removeValue(forKey: stalePeerID)
+                        self.peripheralCharacteristics.removeValue(forKey: peripheral)
                     }
                     
                     // Remove RSSI data
-                    peerRSSI.removeValue(forKey: stalePeerID)
+                    self.peerRSSI.removeValue(forKey: stalePeerID)
                     
                     // Clear cached messages tracking
-                    cachedMessagesSentToPeer.remove(stalePeerID)
+                    self.cachedMessagesSentToPeer.remove(stalePeerID)
                     
                     // Remove from last seen timestamps
-                    peerLastSeenTimestamps.removeValue(forKey: stalePeerID)
+                    self.peerLastSeenTimestamps.removeValue(forKey: stalePeerID)
                     
                     // Remove from processed key exchanges
-                    processedKeyExchanges = processedKeyExchanges.filter { !$0.contains(stalePeerID) }
+                    self.processedKeyExchanges = self.processedKeyExchanges.filter { !$0.contains(stalePeerID) }
                 }
                 
                 // If we had stale peers, notify the UI immediately
@@ -1848,8 +1846,8 @@ class BluetoothMeshService: NSObject {
                 }
                 
                 // Now add the new peer ID with the nickname
-                peerNicknames[senderID] = nickname
-                peerNicknamesLock.unlock()
+                self.peerNicknames[senderID] = nickname
+                self.peerNicknamesLock.unlock()
                 
                 // Note: We can't update peripheral mapping here since we don't have 
                 // access to which peripheral sent this announce. The mapping will be
@@ -1857,16 +1855,16 @@ class BluetoothMeshService: NSObject {
                 
                 // Add to active peers if not already there
                 if senderID != "unknown" {
-                    activePeersLock.lock()
-                    let wasInserted = activePeers.insert(senderID).inserted
-                    activePeersLock.unlock()
+                    self.activePeersLock.lock()
+                    let wasInserted = self.activePeers.insert(senderID).inserted
+                    self.activePeersLock.unlock()
                     if wasInserted {
                         // Added peer \(senderID) (\(nickname)) to active peers
                     }
                     
                     // Show join message only for first announce
                     if isFirstAnnounce {
-                        announcedPeers.insert(senderID)
+                        self.announcedPeers.insert(senderID)
                         DispatchQueue.main.async {
                             self.delegate?.didConnectToPeer(nickname)
                         }
@@ -1910,7 +1908,7 @@ class BluetoothMeshService: NSObject {
                 }
             } else {
             }
-            
+
         case .leave:
             if let senderID = String(data: packet.senderID.trimmingNullBytes(), encoding: .utf8) {
                 // Check if payload contains a channel hashtag
@@ -1932,11 +1930,11 @@ class BluetoothMeshService: NSObject {
                     // Legacy peer disconnect (keeping for backwards compatibility)
                     if let nickname = String(data: packet.payload, encoding: .utf8) {
                         // Remove from active peers with proper locking
-                        activePeersLock.lock()
-                        activePeers.remove(senderID)
-                        activePeersLock.unlock()
+                        self.activePeersLock.lock()
+                        self.activePeers.remove(senderID)
+                        self.activePeersLock.unlock()
                         
-                        announcedPeers.remove(senderID)
+                        self.announcedPeers.remove(senderID)
                         
                         // Show leave message
                         DispatchQueue.main.async {
@@ -1945,9 +1943,9 @@ class BluetoothMeshService: NSObject {
                         self.notifyPeerListUpdate()
                         
                         // Clean up peer data
-                        peerNicknamesLock.lock()
-                        peerNicknames.removeValue(forKey: senderID)
-                        peerNicknamesLock.unlock()
+                        self.peerNicknamesLock.lock()
+                        self.peerNicknames.removeValue(forKey: senderID)
+                        self.peerNicknamesLock.unlock()
                     }
                 }
             }
@@ -1961,7 +1959,7 @@ class BluetoothMeshService: NSObject {
                 return
             }
             
-            handleFragment(packet, from: peerID)
+            self.handleFragment(packet, from: peerID)
             
             // Relay fragments if TTL > 0
             var relayPacket = packet
@@ -1998,11 +1996,11 @@ class BluetoothMeshService: NSObject {
             // Handle delivery acknowledgment
             if let recipientIDData = packet.recipientID,
                let recipientID = String(data: recipientIDData.trimmingNullBytes(), encoding: .utf8),
-               recipientID == myPeerID {
+               recipientID == self.myPeerID {
                 // This ACK is for us - decrypt it
                 if let senderID = String(data: packet.senderID.trimmingNullBytes(), encoding: .utf8) {
                     do {
-                        let decryptedData = try encryptionService.decrypt(packet.payload, from: senderID)
+                        let decryptedData = try self.encryptionService.decrypt(packet.payload, from: senderID)
                         if let ack = DeliveryAck.decode(from: decryptedData) {
                             // Process the ACK
                             DeliveryTracker.shared.processDeliveryAck(ack)
@@ -2050,11 +2048,11 @@ class BluetoothMeshService: NSObject {
             // Handle read receipt
             if let recipientIDData = packet.recipientID,
                let recipientID = String(data: recipientIDData.trimmingNullBytes(), encoding: .utf8),
-               recipientID == myPeerID {
+               recipientID == self.myPeerID {
                 // This read receipt is for us - decrypt it
                 if let senderID = String(data: packet.senderID.trimmingNullBytes(), encoding: .utf8) {
                     do {
-                        let decryptedData = try encryptionService.decrypt(packet.payload, from: senderID)
+                        let decryptedData = try self.encryptionService.decrypt(packet.payload, from: senderID)
                         if let receipt = ReadReceipt.decode(from: decryptedData) {
                             // Process the read receipt
                             DispatchQueue.main.async {
@@ -2121,7 +2119,7 @@ class BluetoothMeshService: NSObject {
             let fragmentPacket = BitchatPacket(
                 type: fragmentType.rawValue,
                 ttl: packet.ttl,
-                senderID: myPeerID,
+                senderID: self.myPeerID,
                 payload: fragmentPayload
             )
             
@@ -2286,13 +2284,13 @@ extension BluetoothMeshService: CBCentralManagerDelegate {
         lastRSSIUpdate[peripheralID] = Date()
         
         // Store RSSI by peripheral ID for later use
-        peripheralRSSI[peripheralID] = RSSI
+        self.peripheralRSSI[peripheralID] = RSSI
         
         // Extract peer ID from name (no prefix for stealth)
         if let name = peripheral.name, name.count == 8 {
             // Assume 8-character names are peer IDs
             let peerID = name
-            peerRSSI[peerID] = RSSI
+            self.peerRSSI[peerID] = RSSI
             // Discovered potential peer
         }
         
@@ -2350,7 +2348,7 @@ extension BluetoothMeshService: CBCentralManagerDelegate {
         
         // Store peripheral by its system ID temporarily until we get the real peer ID
         let tempID = peripheral.identifier.uuidString
-        connectedPeripherals[tempID] = peripheral
+        self.connectedPeripherals[tempID] = peripheral
         
         // Connected to peripheral
         
@@ -2371,8 +2369,8 @@ extension BluetoothMeshService: CBCentralManagerDelegate {
         let peripheralID = peripheral.identifier.uuidString
         
         // Check if this was an intentional disconnect
-        if intentionalDisconnects.contains(peripheralID) {
-            intentionalDisconnects.remove(peripheralID)
+        if self.intentionalDisconnects.contains(peripheralID) {
+            self.intentionalDisconnects.remove(peripheralID)
             // Don't process this disconnect further
             return
         }
@@ -2393,7 +2391,7 @@ extension BluetoothMeshService: CBCentralManagerDelegate {
         
         // Find peer ID for this peripheral (could be temp ID or real ID)
         var foundPeerID: String? = nil
-        for (id, per) in connectedPeripherals {
+        for (id, per) in self.connectedPeripherals {
             if per == peripheral {
                 foundPeerID = id
                 break
@@ -2401,36 +2399,36 @@ extension BluetoothMeshService: CBCentralManagerDelegate {
         }
         
         if let peerID = foundPeerID {
-            connectedPeripherals.removeValue(forKey: peerID)
-            peripheralCharacteristics.removeValue(forKey: peripheral)
+            self.connectedPeripherals.removeValue(forKey: peerID)
+            self.peripheralCharacteristics.removeValue(forKey: peripheral)
             
             // print("[DEBUG] Peripheral disconnected with ID: \(peerID)")
             
             // Only remove from active peers if it's not a temp ID
             // Temp IDs shouldn't be in activePeers anyway
             if peerID.count <= 8 {  // Real peer ID
-                activePeersLock.lock()
-                let wasRemoved = activePeers.remove(peerID) != nil
-                activePeersLock.unlock()
+                self.activePeersLock.lock()
+                let wasRemoved = self.activePeers.remove(peerID) != nil
+                self.activePeersLock.unlock()
                 
                 if wasRemoved {
                     // print("[DEBUG] Removed peer \(peerID) from active peers due to disconnect")
                 }
                 
-                announcedPeers.remove(peerID)
-                announcedToPeers.remove(peerID)
+                self.announcedPeers.remove(peerID)
+                self.announcedToPeers.remove(peerID)
             } else {
                 // print("[DEBUG] Peripheral with temp ID \(peerID) disconnected, not removing from active peers")
             }
             
             // Clear cached messages tracking for this peer to allow re-sending if they reconnect
-            cachedMessagesSentToPeer.remove(peerID)
+            self.cachedMessagesSentToPeer.remove(peerID)
             // Peer disconnected
             
             // Only show disconnect if we have a resolved nickname
-            peerNicknamesLock.lock()
-            let nickname = peerNicknames[peerID]
-            peerNicknamesLock.unlock()
+            self.peerNicknamesLock.lock()
+            let nickname = self.peerNicknames[peerID]
+            self.peerNicknamesLock.unlock()
             
             if let nickname = nickname, nickname != peerID {
                 DispatchQueue.main.async {
@@ -2444,10 +2442,10 @@ extension BluetoothMeshService: CBCentralManagerDelegate {
         discoveredPeripherals.removeAll { $0 == peripheral }
         
         // Continue scanning for reconnection
-        if centralManager?.state == .poweredOn {
+        if self.centralManager?.state == .poweredOn {
             // Stop and restart to ensure clean state
-            centralManager?.stopScan()
-            centralManager?.scanForPeripherals(withServices: [BluetoothMeshService.serviceUUID], options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+            self.centralManager?.stopScan()
+            self.centralManager?.scanForPeripherals(withServices: [BluetoothMeshService.serviceUUID], options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         }
     }
 }
@@ -2467,7 +2465,7 @@ extension BluetoothMeshService: CBPeripheralDelegate {
         for characteristic in characteristics {
             if characteristic.uuid == BluetoothMeshService.characteristicUUID {
                 peripheral.setNotifyValue(true, for: characteristic)
-                peripheralCharacteristics[peripheral] = characteristic
+                self.peripheralCharacteristics[peripheral] = characteristic
                 
                 // Request maximum MTU for faster data transfer
                 // iOS supports up to 512 bytes with BLE 5.0
@@ -2538,7 +2536,7 @@ extension BluetoothMeshService: CBPeripheralDelegate {
         }
         
         // Use the sender ID from the packet, not our local mapping which might still be a temp ID
-        let _ = connectedPeripherals.first(where: { $0.value == peripheral })?.key ?? "unknown"
+        let _ = self.connectedPeripherals.first(where: { $0.value == peripheral })?.key ?? "unknown"
         let packetSenderID = String(data: packet.senderID.trimmingNullBytes(), encoding: .utf8) ?? "unknown"
         
         // Always handle received packets
@@ -2568,7 +2566,7 @@ extension BluetoothMeshService: CBPeripheralDelegate {
         guard error == nil else { return }
         
         // Find the peer ID for this peripheral
-        if let peerID = connectedPeripherals.first(where: { $0.value == peripheral })?.key {
+        if let peerID = self.connectedPeripherals.first(where: { $0.value == peripheral })?.key {
             // Handle both temp IDs and real peer IDs
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
@@ -2652,7 +2650,7 @@ extension BluetoothMeshService: CBPeripheralManagerDelegate {
                 }
                 
                 // Track this peer as connected
-                if peerID != "unknown" && peerID != myPeerID {
+                if peerID != "unknown" && peerID != self.myPeerID {
                     // Send key exchange back if we haven't already
                     if packet.type == MessageType.keyExchange.rawValue {
                         let publicKeyData = self.encryptionService.getCombinedPublicKeyData()
@@ -2704,11 +2702,11 @@ extension BluetoothMeshService: CBPeripheralManagerDelegate {
             subscribedCentrals.append(central)
             
             // Send our public key to the newly connected central
-            let publicKeyData = encryptionService.getCombinedPublicKeyData()
+            let publicKeyData = self.encryptionService.getCombinedPublicKeyData()
             let keyPacket = BitchatPacket(
                 type: MessageType.keyExchange.rawValue,
                 ttl: 1,
-                senderID: myPeerID,
+                senderID: self.myPeerID,
                 payload: publicKeyData
             )
             
@@ -2767,7 +2765,7 @@ extension BluetoothMeshService: CBPeripheralManagerDelegate {
         let maxConnections = powerMode.maxConnections
         
         // If we have too many connections, disconnect from the least important ones
-        if connectedPeripherals.count > maxConnections {
+        if self.connectedPeripherals.count > maxConnections {
             disconnectLeastImportantPeripherals(keepCount: maxConnections)
         }
         
@@ -2792,7 +2790,7 @@ extension BluetoothMeshService: CBPeripheralManagerDelegate {
     
     private func disconnectLeastImportantPeripherals(keepCount: Int) {
         // Disconnect peripherals with lowest activity/importance
-        let sortedPeripherals = connectedPeripherals.values
+        let sortedPeripherals = self.connectedPeripherals.values
             .sorted { peer1, peer2 in
                 // Keep peripherals we've recently communicated with
                 let peer1Activity = lastMessageFromPeer[peer1.identifier.uuidString] ?? Date.distantPast
@@ -2803,7 +2801,7 @@ extension BluetoothMeshService: CBPeripheralManagerDelegate {
         // Disconnect the least active ones
         let toDisconnect = sortedPeripherals.dropFirst(keepCount)
         for peripheral in toDisconnect {
-            centralManager?.cancelPeripheralConnection(peripheral)
+            self.centralManager?.cancelPeripheralConnection(peripheral)
         }
     }
     
@@ -2854,7 +2852,7 @@ extension BluetoothMeshService: CBPeripheralManagerDelegate {
     
     private func randomDelay() -> TimeInterval {
         // Generate random delay between min and max for timing obfuscation
-        return TimeInterval.random(in: minMessageDelay...maxMessageDelay)
+        return TimeInterval.random(in: self.minMessageDelay...self.maxMessageDelay)
     }
     
     // MARK: - Cover Traffic
@@ -2894,9 +2892,9 @@ extension BluetoothMeshService: CBPeripheralManagerDelegate {
         // Sending cover traffic
         
         // Send as a private message so it's encrypted
-        peerNicknamesLock.lock()
-        let recipientNickname = peerNicknames[randomPeer] ?? "unknown"
-        peerNicknamesLock.unlock()
+        self.peerNicknamesLock.lock()
+        let recipientNickname = self.peerNicknames[randomPeer] ?? "unknown"
+        self.peerNicknamesLock.unlock()
         
         sendPrivateMessage(dummyContent, to: randomPeer, recipientNickname: recipientNickname)
     }
@@ -2928,6 +2926,6 @@ extension BluetoothMeshService: CBPeripheralManagerDelegate {
     
     
     private func updatePeerLastSeen(_ peerID: String) {
-        peerLastSeenTimestamps[peerID] = Date()
+        self.peerLastSeenTimestamps[peerID] = Date()
     }
 }

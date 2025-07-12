@@ -350,6 +350,6 @@ struct FeatureRow: View {
     }
 }
 
-#Preview {
-    AppInfoView()
-}
+//#Preview {
+//    AppInfoView()
+//}

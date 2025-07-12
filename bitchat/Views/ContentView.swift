@@ -26,7 +26,8 @@ struct ContentView: View {
     @State private var showPasswordError = false
     @State private var showCommandSuggestions = false
     @State private var commandSuggestions: [String] = []
-    @State private var showLeaveChannelAlert = false
+    @State private var lastTranslation: CGFloat = 0
+    @State private var lastTime: Date = .now
     
     private var backgroundColor: Color {
         colorScheme == .dark ? Color.black : Color.white
@@ -57,6 +58,10 @@ struct ContentView: View {
                     .gesture(
                         DragGesture()
                             .onChanged { value in
+                                // Update last translation and time for velocity calculation
+                                lastTranslation = value.translation.width
+                                lastTime = Date()
+                                
                                 // Only respond to leftward swipes when sidebar is closed
                                 // or rightward swipes when sidebar is open
                                 if !showSidebar && value.translation.width < 0 {
@@ -66,10 +71,15 @@ struct ContentView: View {
                                 }
                             }
                             .onEnded { value in
+                                // Calculate velocity (points per second)
+                                let timeDelta = Date().timeIntervalSince(lastTime)
+                                let translationDelta = value.translation.width - lastTranslation
+                                let velocity = timeDelta > 0 ? translationDelta / CGFloat(timeDelta) : 0
+                                
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                     if !showSidebar {
                                         // Opening gesture (swipe left)
-                                        if value.translation.width < -100 || (value.translation.width < -50 && value.velocity.width < -500) {
+                                        if value.translation.width < -100 || (value.translation.width < -50 && velocity < -500) {
                                             showSidebar = true
                                             sidebarDragOffset = 0
                                         } else {
@@ -77,7 +87,7 @@ struct ContentView: View {
                                         }
                                     } else {
                                         // Closing gesture (swipe right)
-                                        if value.translation.width > 100 || (value.translation.width > 50 && value.velocity.width > 500) {
+                                        if value.translation.width > 100 || (value.translation.width > 50 && velocity > 500) {
                                             showSidebar = false
                                             sidebarDragOffset = 0
                                         } else {
@@ -85,6 +95,10 @@ struct ContentView: View {
                                         }
                                     }
                                 }
+                                
+                                // Reset tracking variables
+                                lastTranslation = 0
+                                lastTime = .now
                             }
                     )
                     
@@ -167,6 +181,7 @@ struct ContentView: View {
         }
     }
     
+    @ViewBuilder
     private var headerView: some View {
         HStack {
             if let privatePeerID = viewModel.selectedPrivateChatPeer,
@@ -290,21 +305,13 @@ struct ContentView: View {
                     
                     // Leave channel button
                     Button(action: {
-                        showLeaveChannelAlert = true
+                        viewModel.leaveChannel(currentChannel)
                     }) {
                         Text("leave")
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundColor(Color.red)
                     }
                     .buttonStyle(.plain)
-                    .alert("leave channel?", isPresented: $showLeaveChannelAlert) {
-                        Button("cancel", role: .cancel) { }
-                        Button("leave", role: .destructive) {
-                            viewModel.leaveChannel(currentChannel)
-                        }
-                    } message: {
-                        Text("sure you want to leave \(currentChannel)?")
-                    }
                 }
             } else {
                 // Public chat header
@@ -424,38 +431,18 @@ struct ContentView: View {
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             } else {
                                 // Regular messages with natural text wrapping
-                                VStack(alignment: .leading, spacing: 8) {
-                                    HStack(alignment: .top, spacing: 0) {
-                                        // Single text view for natural wrapping
-                                        Text(viewModel.formatMessageAsText(message, colorScheme: colorScheme))
-                                            .textSelection(.enabled)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                        
-                                        // Delivery status indicator for private messages
-                                        if message.isPrivate && message.sender == viewModel.nickname,
-                                           let status = message.deliveryStatus {
-                                            DeliveryStatusView(status: status, colorScheme: colorScheme)
-                                                .padding(.leading, 4)
-                                        }
-                                    }
+                                HStack(alignment: .top, spacing: 0) {
+                                    // Single text view for natural wrapping
+                                    Text(viewModel.formatMessageAsText(message, colorScheme: colorScheme))
+                                        .textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                     
-                                    // Check for links and show preview
-                                    if let markdownLink = message.content.extractMarkdownLink() {
-                                        // Don't show link preview if the message is just the emoji
-                                        let cleanContent = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-                                        if cleanContent.hasPrefix("👇") {
-                                            LinkPreviewView(url: markdownLink.url, title: markdownLink.title)
-                                                .padding(.top, 4)
-                                        }
-                                    } else {
-                                        // Check for plain URLs
-                                        let urls = message.content.extractURLs()
-                                        let _ = urls.isEmpty ? nil : print("DEBUG: Found \(urls.count) plain URLs in message")
-                                        ForEach(urls.prefix(3), id: \.url) { urlInfo in
-                                            LinkPreviewView(url: urlInfo.url, title: nil)
-                                                .padding(.top, 4)
-                                        }
+                                    // Delivery status indicator for private messages
+                                    if message.isPrivate && message.sender == viewModel.nickname,
+                                       let status = message.deliveryStatus {
+                                        DeliveryStatusView(status: status, colorScheme: colorScheme)
+                                            .padding(.leading, 4)
                                     }
                                 }
                             }
@@ -619,106 +606,104 @@ struct ContentView: View {
             }
             
             HStack(alignment: .center, spacing: 4) {
-            if viewModel.selectedPrivateChatPeer != nil {
-                Text("<@\(viewModel.nickname)> →")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(Color.orange)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .padding(.leading, 12)
-            } else if let currentChannel = viewModel.currentChannel, viewModel.passwordProtectedChannels.contains(currentChannel) {
-                Text("<@\(viewModel.nickname)> →")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(Color.orange)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .padding(.leading, 12)
-            } else {
-                Text("<@\(viewModel.nickname)>")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                if viewModel.selectedPrivateChatPeer != nil {
+                    Text("<@\(viewModel.nickname)> →")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(Color.orange)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.leading, 12)
+                } else if let currentChannel = viewModel.currentChannel, viewModel.passwordProtectedChannels.contains(currentChannel) {
+                    Text("<@\(viewModel.nickname)> →")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(Color.orange)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.leading, 12)
+                } else {
+                    Text("<@\(viewModel.nickname)>")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(textColor)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.leading, 12)
+                }
+                
+                TextField("", text: $messageText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 14, design: .monospaced))
                     .foregroundColor(textColor)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .padding(.leading, 12)
-            }
-            
-            TextField("", text: $messageText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 14, design: .monospaced))
-                .foregroundColor(textColor)
-                .autocorrectionDisabled()
-                .focused($isTextFieldFocused)
-                .onChange(of: messageText) { newValue in
-                    // Get cursor position (approximate - end of text for now)
-                    let cursorPosition = newValue.count
-                    viewModel.updateAutocomplete(for: newValue, cursorPosition: cursorPosition)
-                    
-                    // Check for command autocomplete
-                    if newValue.hasPrefix("/") && newValue.count >= 1 {
-                        // Build context-aware command list
-                        var commandDescriptions = [
-                            ("/block", "block or list blocked peers"),
-                            ("/channels", "show all discovered channels"),
-                            ("/clear", "clear chat messages"),
-                            ("/hug", "send someone a warm hug"),
-                            ("/j", "join or create a channel"),
-                            ("/m", "send private message"),
-                            ("/slap", "slap someone with a trout"),
-                            ("/unblock", "unblock a peer"),
-                            ("/w", "see who's online")
-                        ]
+                    .focused($isTextFieldFocused)
+                    .onChange(of: messageText) { newValue in
+                        // Get cursor position (approximate - end of text for now)
+                        let cursorPosition = newValue.count
+                        viewModel.updateAutocomplete(for: newValue, cursorPosition: cursorPosition)
                         
-                        // Add channel-specific commands if in a channel
-                        if viewModel.currentChannel != nil {
-                            commandDescriptions.append(("/pass", "change channel password"))
-                            commandDescriptions.append(("/save", "save channel messages locally"))
-                            commandDescriptions.append(("/transfer", "transfer channel ownership"))
-                        }
-                        
-                        let input = newValue.lowercased()
-                        
-                        // Map of aliases to primary commands
-                        let aliases: [String: String] = [
-                            "/join": "/j",
-                            "/msg": "/m"
-                        ]
-                        
-                        // Filter commands, but convert aliases to primary
-                        commandSuggestions = commandDescriptions
-                            .filter { $0.0.starts(with: input) }
-                            .map { $0.0 }
-                        
-                        // Also check if input matches an alias
-                        for (alias, primary) in aliases {
-                            if alias.starts(with: input) && !commandSuggestions.contains(primary) {
-                                if commandDescriptions.contains(where: { $0.0 == primary }) {
-                                    commandSuggestions.append(primary)
+                        // Check for command autocomplete
+                        if newValue.hasPrefix("/") && newValue.count >= 1 {
+                            // Build context-aware command list
+                            var commandDescriptions = [
+                                ("/block", "block or list blocked peers"),
+                                ("/channels", "show all discovered channels"),
+                                ("/clear", "clear chat messages"),
+                                ("/hug", "send someone a warm hug"),
+                                ("/j", "join or create a channel"),
+                                ("/m", "send private message"),
+                                ("/slap", "slap someone with a trout"),
+                                ("/unblock", "unblock a peer"),
+                                ("/w", "see who's online")
+                            ]
+                            
+                            // Add channel-specific commands if in a channel
+                            if viewModel.currentChannel != nil {
+                                commandDescriptions.append(("/pass", "change channel password"))
+                                commandDescriptions.append(("/save", "save channel messages locally"))
+                                commandDescriptions.append(("/transfer", "transfer channel ownership"))
+                            }
+                            
+                            let input = newValue.lowercased()
+                            
+                            // Map of aliases to primary commands
+                            let aliases: [String: String] = [
+                                "/join": "/j",
+                                "/msg": "/m"
+                            ]
+                            
+                            // Filter commands, but convert aliases to primary
+                            commandSuggestions = commandDescriptions
+                                .filter { $0.0.starts(with: input) }
+                                .map { $0.0 }
+                            
+                            // Also check if input matches an alias
+                            for (alias, primary) in aliases {
+                                if alias.starts(with: input) && !commandSuggestions.contains(primary) {
+                                    if commandDescriptions.contains(where: { $0.0 == primary }) {
+                                        commandSuggestions.append(primary)
+                                    }
                                 }
                             }
+                            
+                            // Remove duplicates and sort
+                            commandSuggestions = Array(Set(commandSuggestions)).sorted()
+                            showCommandSuggestions = !commandSuggestions.isEmpty
+                        } else {
+                            showCommandSuggestions = false
+                            commandSuggestions = []
                         }
-                        
-                        // Remove duplicates and sort
-                        commandSuggestions = Array(Set(commandSuggestions)).sorted()
-                        showCommandSuggestions = !commandSuggestions.isEmpty
-                    } else {
-                        showCommandSuggestions = false
-                        commandSuggestions = []
                     }
+                    .onSubmit {
+                        sendMessage()
+                    }
+                
+                Button(action: sendMessage) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor((viewModel.selectedPrivateChatPeer != nil || 
+                                         (viewModel.currentChannel != nil && viewModel.passwordProtectedChannels.contains(viewModel.currentChannel ?? ""))) 
+                                         ? Color.orange : textColor)
                 }
-                .onSubmit {
-                    sendMessage()
-                }
-            
-            Button(action: sendMessage) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundColor(messageText.isEmpty ? Color.gray :
-                                            (viewModel.selectedPrivateChatPeer != nil ||
-                                             (viewModel.currentChannel != nil && viewModel.passwordProtectedChannels.contains(viewModel.currentChannel ?? "")))
-                                             ? Color.orange : textColor)
-            }
-            .buttonStyle(.plain)
-            .padding(.trailing, 12)
+                .buttonStyle(.plain)
+                .padding(.trailing, 12)
             }
             .padding(.vertical, 8)
             .background(backgroundColor.opacity(0.95))
@@ -839,7 +824,7 @@ struct ContentView: View {
             
             // Leave button
             Button(action: {
-                showLeaveChannelAlert = true
+                viewModel.leaveChannel(channel)
             }) {
                 Text("leave channel")
                     .font(.system(size: 10, design: .monospaced))
@@ -848,21 +833,14 @@ struct ContentView: View {
                     .padding(.vertical, 2)
                     .overlay(
                         RoundedRectangle(cornerRadius: 4)
-                            .stroke(secondaryTextColor.opacity(0.5), lineWidth: 1)
+                        .stroke(secondaryTextColor.opacity(0.5), lineWidth: 1)
                     )
             }
             .buttonStyle(.plain)
-            .alert("leave channel", isPresented: $showLeaveChannelAlert) {
-                Button("cancel", role: .cancel) { }
-                Button("leave", role: .destructive) {
-                    viewModel.leaveChannel(channel)
-                }
-            } message: {
-                Text("sure you want to leave \(channel)?")
-            }
         }
     }
     
+    @ViewBuilder
     private var sidebarView: some View {
         HStack(spacing: 0) {
             // Grey vertical bar for visual continuity
@@ -884,166 +862,179 @@ struct ContentView: View {
                 
                 Divider()
             
-            // Rooms and People list
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    // Channels section
-                    channelsSection
-                    
-                    if !viewModel.joinedChannels.isEmpty {
-                        Divider()
-                            .padding(.vertical, 4)
-                    }
-                    
-                    // People section
-                    VStack(alignment: .leading, spacing: 8) {
-                        // Show appropriate header based on context
-                        if let currentChannel = viewModel.currentChannel {
-                            Text("IN \(currentChannel.uppercased())")
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                // Rooms and People list
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        // Channels section
+                        channelsSection
+                        
+                        if !viewModel.joinedChannels.isEmpty {
+                            Divider()
+                                .padding(.vertical, 4)
+                        }
+                        
+                        // People section
+                        VStack(alignment: .leading, spacing: 8) {
+                            // Show appropriate header based on context
+                            if let currentChannel = viewModel.currentChannel {
+                                Text("IN \(currentChannel.uppercased())")
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(secondaryTextColor)
+                                    .padding(.horizontal, 12)
+                            } else if !viewModel.connectedPeers.isEmpty {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "person.2.fill")
+                                        .font(.system(size: 10))
+                                    Text("PEOPLE")
+                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                }
                                 .foregroundColor(secondaryTextColor)
                                 .padding(.horizontal, 12)
-                        } else if !viewModel.connectedPeers.isEmpty {
-                            HStack(spacing: 4) {
-                                Image(systemName: "person.2.fill")
-                                    .font(.system(size: 10))
-                                Text("PEOPLE")
-                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            }
-                            .foregroundColor(secondaryTextColor)
-                            .padding(.horizontal, 12)
-                        }
-                        
-                        if viewModel.connectedPeers.isEmpty {
-                            Text("No one connected")
-                                .font(.system(size: 14, design: .monospaced))
-                                .foregroundColor(secondaryTextColor)
-                                .padding(.horizontal)
-                        } else if let currentChannel = viewModel.currentChannel,
-                                  let channelMemberIDs = viewModel.channelMembers[currentChannel],
-                                  channelMemberIDs.isEmpty {
-                            Text("No one in this channel yet")
-                                .font(.system(size: 14, design: .monospaced))
-                                .foregroundColor(secondaryTextColor)
-                                .padding(.horizontal)
-                        } else {
-                            let peerNicknames = viewModel.meshService.getPeerNicknames()
-                            let peerRSSI = viewModel.meshService.getPeerRSSI()
-                            let myPeerID = viewModel.meshService.myPeerID
-                            
-                            // Filter peers based on current channel
-                            let peersToShow: [String] = {
-                                if let currentChannel = viewModel.currentChannel,
-                                   let channelMemberIDs = viewModel.channelMembers[currentChannel] {
-                                    // Show only peers who have sent messages to this channel (including self)
-                                    
-                                    // Start with channel members who are also connected
-                                    var memberPeers = viewModel.connectedPeers.filter { channelMemberIDs.contains($0) }
-                                    
-                                    // Always include ourselves if we're a channel member
-                                    if channelMemberIDs.contains(myPeerID) && !memberPeers.contains(myPeerID) {
-                                        memberPeers.append(myPeerID)
-                                    }
-                                    
-                                    return memberPeers
-                                } else {
-                                    // Show all connected peers in main chat
-                                    return viewModel.connectedPeers
-                                }
-                            }()
-                            
-                        // Sort peers: favorites first, then alphabetically by nickname
-                        let sortedPeers = peersToShow.sorted { peer1, peer2 in
-                            let isFav1 = viewModel.isFavorite(peerID: peer1)
-                            let isFav2 = viewModel.isFavorite(peerID: peer2)
-                            
-                            if isFav1 != isFav2 {
-                                return isFav1 // Favorites come first
                             }
                             
-                            let name1 = peerNicknames[peer1] ?? "person-\(peer1.prefix(4))"
-                            let name2 = peerNicknames[peer2] ?? "person-\(peer2.prefix(4))"
-                            return name1 < name2
-                        }
-                        
-                        ForEach(sortedPeers, id: \.self) { peerID in
-                            let displayName = peerID == myPeerID ? viewModel.nickname : (peerNicknames[peerID] ?? "person-\(peerID.prefix(4))")
-                            let rssi = peerRSSI[peerID]?.intValue ?? -100
-                            let isFavorite = viewModel.isFavorite(peerID: peerID)
-                            let isMe = peerID == myPeerID
-                            
-                            HStack(spacing: 8) {
-                                // Signal strength indicator or unread message icon
-                                if isMe {
-                                    Image(systemName: "person.fill")
-                                        .font(.system(size: 10))
-                                        .foregroundColor(textColor)
-                                } else if viewModel.unreadPrivateMessages.contains(peerID) {
-                                    Image(systemName: "envelope.fill")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(Color.orange)
-                                } else {
-                                    Circle()
-                                        .fill(viewModel.getRSSIColor(rssi: rssi, colorScheme: colorScheme))
-                                        .frame(width: 8, height: 8)
-                                }
+                            if viewModel.connectedPeers.isEmpty {
+                                Text("No one connected")
+                                    .font(.system(size: 14, design: .monospaced))
+                                    .foregroundColor(secondaryTextColor)
+                                    .padding(.horizontal)
+                            } else if let currentChannel = viewModel.currentChannel,
+                                      let channelMemberIDs = viewModel.channelMembers[currentChannel],
+                                      channelMemberIDs.isEmpty {
+                                Text("No one in this channel yet")
+                                    .font(.system(size: 14, design: .monospaced))
+                                    .foregroundColor(secondaryTextColor)
+                                    .padding(.horizontal)
+                            } else {
+                                let peerNicknames = viewModel.meshService.getPeerNicknames()
+                                let peerRSSI = viewModel.meshService.getPeerRSSI()
+                                let myPeerID = viewModel.meshService.myPeerID
                                 
-                                // Favorite star (not for self)
-                                if !isMe {
-                                    Button(action: {
-                                        viewModel.toggleFavorite(peerID: peerID)
-                                    }) {
-                                        Image(systemName: isFavorite ? "star.fill" : "star")
-                                            .font(.system(size: 12))
-                                            .foregroundColor(isFavorite ? Color.yellow : secondaryTextColor)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                                
-                                // Peer name
-                                if isMe {
-                                    HStack {
-                                        Text(displayName + " (you)")
-                                            .font(.system(size: 14, design: .monospaced))
-                                            .foregroundColor(textColor)
+                                // Filter peers based on current channel
+                                let peersToShow: [String] = {
+                                    if let currentChannel = viewModel.currentChannel,
+                                       let channelMemberIDs = viewModel.channelMembers[currentChannel] {
+                                        // Show only peers who have sent messages to this channel (including self)
+                                        var memberPeers = viewModel.connectedPeers.filter { channelMemberIDs.contains($0) }
                                         
-                                        Spacer()
-                                    }
-                                } else {
-                                    Button(action: {
-                                        if peerNicknames[peerID] != nil {
-                                            viewModel.startPrivateChat(with: peerID)
-                                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                                showSidebar = false
-                                                sidebarDragOffset = 0
-                                            }
+                                        // Always include ourselves if we're a channel member
+                                        if channelMemberIDs.contains(myPeerID) && !memberPeers.contains(myPeerID) {
+                                            memberPeers.append(myPeerID)
                                         }
-                                    }) {
-                                        HStack {
-                                            Text(displayName)
-                                                .font(.system(size: 14, design: .monospaced))
-                                                .foregroundColor(peerNicknames[peerID] != nil ? textColor : secondaryTextColor)
-                                            
-                                            Spacer()
-                                        }
+                                        
+                                        return memberPeers
+                                    } else {
+                                        // Show all connected peers in main chat
+                                        return viewModel.connectedPeers
                                     }
-                                    .buttonStyle(.plain)
-                                    .disabled(peerNicknames[peerID] == nil)
+                                }()
+                                
+                                // Sort peers: favorites first, then alphabetically by nickname
+                                let sortedPeers = peersToShow.sorted { peer1, peer2 in
+                                    let isFav1 = viewModel.isFavorite(peerID: peer1)
+                                    let isFav2 = viewModel.isFavorite(peerID: peer2)
+                                    
+                                    if isFav1 != isFav2 {
+                                        return isFav1 // Favorites come first
+                                    }
+                                    
+                                    let name1 = peerNicknames[peer1] ?? "person-\(peer1.prefix(4))"
+                                    let name2 = peerNicknames[peer2] ?? "person-\(peer2.prefix(4))"
+                                    return name1 < name2
+                                }
+                                
+                                ForEach(sortedPeers, id: \.self) { peerID in
+                                    peerRow(
+                                        peerID: peerID,
+                                        peerNicknames: peerNicknames,
+                                        peerRSSI: peerRSSI,
+                                        myPeerID: myPeerID
+                                    )
                                 }
                             }
-                            .padding(.horizontal)
-                            .padding(.vertical, 8)
-                        }
                         }
                     }
+                    .padding(.vertical, 8)
                 }
-                .padding(.vertical, 8)
+                
+                Spacer()
+            }
+            .background(backgroundColor)
+        }
+    }
+    
+    @ViewBuilder
+    private func peerRow(
+        peerID: String,
+        peerNicknames: [String: String],
+        peerRSSI: [String: NSNumber],
+        myPeerID: String
+    ) -> some View {
+        let displayName = peerID == myPeerID ? viewModel.nickname : (peerNicknames[peerID] ?? "person-\(peerID.prefix(4))")
+        let rssi = peerRSSI[peerID]?.intValue ?? -100
+        let isFavorite = viewModel.isFavorite(peerID: peerID)
+        let isMe = peerID == myPeerID
+        
+        HStack(spacing: 8) {
+            // Signal strength indicator or unread message icon
+            if isMe {
+                Image(systemName: "person.fill")
+                    .font(.system(size: 10))
+                    .foregroundColor(textColor)
+            } else if viewModel.unreadPrivateMessages.contains(peerID) {
+                Image(systemName: "envelope.fill")
+                    .font(.system(size: 12))
+                    .foregroundColor(Color.orange)
+            } else {
+                Circle()
+                    .fill(viewModel.getRSSIColor(rssi: rssi, colorScheme: colorScheme))
+                    .frame(width: 8, height: 8)
             }
             
-            Spacer()
+            // Favorite star (not for self)
+            if !isMe {
+                Button(action: {
+                    viewModel.toggleFavorite(peerID: peerID)
+                }) {
+                    Image(systemName: isFavorite ? "star.fill" : "star")
+                        .font(.system(size: 12))
+                        .foregroundColor(isFavorite ? Color.yellow : secondaryTextColor)
+                }
+                .buttonStyle(.plain)
+            }
+            
+            // Peer name
+            if isMe {
+                HStack {
+                    Text(displayName + " (you)")
+                        .font(.system(size: 14, design: .monospaced))
+                        .foregroundColor(textColor)
+                    
+                    Spacer()
+                }
+            } else {
+                Button(action: {
+                    if peerNicknames[peerID] != nil {
+                        viewModel.startPrivateChat(with: peerID)
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            showSidebar = false
+                            sidebarDragOffset = 0
+                        }
+                    }
+                }) {
+                    HStack {
+                        Text(displayName)
+                            .font(.system(size: 14, design: .monospaced))
+                            .foregroundColor(peerNicknames[peerID] != nil ? textColor : secondaryTextColor)
+                        
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(peerNicknames[peerID] == nil)
+            }
         }
-        .background(backgroundColor)
-        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
     }
 }
 

@@ -281,9 +281,9 @@ extension String {
     }
 }
 
-#Preview {
-    VStack {
-        LinkPreviewView(url: URL(string: "https://example.com")!, title: "Example Website")
-            .padding()
-    }
-}
+//#Preview {
+//    VStack {
+//        LinkPreviewView(url: URL(string: "https://example.com")!, title: "Example Website")
+//            .padding()
+//    }
+//}
